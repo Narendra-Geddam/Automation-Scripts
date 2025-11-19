@@ -1,6 +1,6 @@
-# JFrog Artifactory OSS Installation Guide (Docker Compose + Manual Master Key)
+# JFrog Artifactory OSS Installation Guide (Version 7.77.3 + PostgreSQL 14)
 
-This guide explains how to install **JFrog Artifactory OSS (7.77.3)** using **Docker Compose**, **PostgreSQL**, and a **manual master key** to avoid initialization failures.
+This guide explains how to install **JFrog Artifactory OSS (7.77.3)** using **Docker Compose** with **PostgreSQL 14**, using required permissions and version‑specific configuration.
 
 ---
 
@@ -11,7 +11,7 @@ Before starting, ensure your system has:
 * Ubuntu 20.04 / 22.04 / 24.04
 * Docker Engine installed
 * Docker Compose (v2+) installed
-* Minimum: 4GB RAM, 20GB storage
+* Minimum: 4GB RAM, 20GB free storage
 
 Verify Docker installation:
 
@@ -24,104 +24,125 @@ docker compose version
 
 ## **2. Create Required Directories**
 
-Create a workspace for Artifactory:
+Create workspace:
 
 ```
 mkdir -p ~/jfrog
 cd ~/jfrog
+```
 
+Create volumes:
+
+```
 mkdir -p artifactory-data
 mkdir -p postgres-data
 ```
 
-Set correct ownership:
+Set correct ownership and permissions:
 
 ```
 sudo chown -R 1030:1030 artifactory-data
 sudo chown -R 999:999 postgres-data
+sudo chmod -R 700 artifactory-data
+sudo chmod -R 700 postgres-data
 ```
 
 **Why these IDs?**
 
-* Artifactory runs as user **1030** inside container
-* PostgreSQL runs as user **999** inside container
+* Artifactory container user = **1030**
+* PostgreSQL container user = **999**
 
 ---
 
 ## **3. Create docker-compose.yml**
 
-Create a file named **docker-compose.yml** inside `~/jfrog` and add:
+Create the file inside `~/jfrog`:
 
 ```yaml
-version: "3.9"
+version: '3.8'
 
 services:
   postgres:
-    image: postgres:15
+    image: postgres:14
     container_name: artifactory-postgres
-    restart: always
     environment:
-      POSTGRES_DB: artifactory
       POSTGRES_USER: artifactory
       POSTGRES_PASSWORD: artifactory
+      POSTGRES_DB: artifactory
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: always
 
   artifactory:
     image: releases-docker.jfrog.io/jfrog/artifactory-oss:7.77.3
     container_name: artifactory
-    restart: always
     depends_on:
       - postgres
     environment:
-      DB_TYPE: postgresql
-      DB_DRIVER: org.postgresql.Driver
-      DB_URL: jdbc:postgresql://postgres:5432/artifactory
-      DB_USER: artifactory
-      DB_PASSWORD: artifactory
-
-      # Manual Master Key (Fixes initialization delays)
-      ARTIFACTORY_MASTER_KEY: thisIsAStrongMasterKey123456789thisIsAStrongKey
-
+      JF_SHARED_DATABASE_TYPE: postgresql
+      JF_SHARED_DATABASE_DRIVER: org.postgresql.Driver
+      JF_SHARED_DATABASE_URL: jdbc:postgresql://postgres:5432/artifactory
+      JF_SHARED_DATABASE_USERNAME: artifactory
+      JF_SHARED_DATABASE_PASSWORD: artifactory
+    volumes:
+      - ./artifactory-data:/var/opt/jfrog/artifactory
     ports:
       - "8081:8081"
       - "8082:8082"
-    volumes:
-      - ./artifactory-data:/var/opt/jfrog/artifactory
+    restart: always
 ```
 
 ---
 
-## **4. Start Artifactory**
+## **4. Clean Old Volumes Before Starting**
 
-Run the following:
+If containers were already created earlier, clean them first:
+
+```
+docker stop artifactory artifactory-postgres
+
+docker rm artifactory artifactory-postgres
+
+sudo rm -rf artifactory-data postgres-data
+```
+
+Recreate fresh volumes:
+
+```
+mkdir artifactory-data postgres-data
+sudo chown -R 1030:1030 artifactory-data
+sudo chown -R 999:999 postgres-data
+sudo chmod -R 700 artifactory-data
+sudo chmod -R 700 postgres-data
+```
+
+---
+
+## **5. Start Artifactory**
+
+Run:
 
 ```
 docker compose up -d
 ```
 
-Check container status:
+Check running containers:
 
 ```
 docker ps
 ```
 
-Follow logs:
+Follow Artifactory logs:
 
 ```
 docker logs -f artifactory
 ```
 
-If installation is successful, logs will show:
-
-```
-Using master key from environment
-All services started successfully
-```
-
 ---
 
-## **5. Access Artifactory**
+## **6. Access Artifactory UI**
 
 Open browser:
 
@@ -129,28 +150,26 @@ Open browser:
 http://<your-server-ip>:8081
 ```
 
-Proceed with the UI-based initial setup.
+---
+
+## **7. Important File Locations**
+
+Host machine:
+
+```
+./artifactory-data
+./postgres-data
+```
+
+Inside container:
+
+```
+/var/opt/jfrog/artifactory
+```
 
 ---
 
-## **6. Important File Locations**
-
-Inside host system:
-
-```
-./artifactory-data/var/opt/jfrog/artifactory
-./postgres-data/
-```
-
-Inside Artifactory container:
-
-```
-/var/opt/jfrog/artifactory/var/etc/security/master.key
-```
-
----
-
-## **7. Common Commands**
+## **8. Common Commands**
 
 Restart services:
 
@@ -164,7 +183,7 @@ Stop services:
 docker compose down
 ```
 
-Delete all data (fresh install):
+Fresh reinstall:
 
 ```
 sudo rm -rf artifactory-data/* postgres-data/*
@@ -172,23 +191,20 @@ sudo rm -rf artifactory-data/* postgres-data/*
 
 ---
 
-## **8. Troubleshooting Tips**
+## **9. Troubleshooting**
 
-### **Issue: `Master key is missing`**
+### **Permission denied errors**
 
-Solution: Manual master key solves this 100%.
-
-### **Issue: Permission denied**
-
-Fix ownership:
+Fix by reapplying correct ownership:
 
 ```
 sudo chown -R 1030:1030 artifactory-data
+sudo chown -R 999:999 postgres-data
 ```
 
-### **Issue: DB connection refused**
+### **Database connection refused**
 
-Check Postgres:
+Check PostgreSQL logs:
 
 ```
 docker logs artifactory-postgres
@@ -196,17 +212,4 @@ docker logs artifactory-postgres
 
 ---
 
-## **9. Summary**
-
-By using a **manual master key**, you avoid:
-
-* Initialization loops
-* 5-minute timeouts
-* Permission-related failures
-* Missing `master.key` errors
-
-Your JFrog Artifactory will now start cleanly and reliably on every reboot.
-
----
-
-If you want, I can generate a **PDF version** of this README or add **images placeholders** for documentation.
+Your Artifactory installation is now ready with version‑specific configuration and correct permissions.
