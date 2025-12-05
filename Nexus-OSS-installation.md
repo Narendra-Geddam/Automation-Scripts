@@ -1,4 +1,5 @@
 # 🚀 Nexus OSS Automated Installation (AWS Optimized)
+![My Image](image.png)
 
 This repository contains an **automated, production-grade installation script** for  
 **Nexus Repository OSS 3.86.2-01**, optimized for AWS t2.medium / t3.medium instances.
