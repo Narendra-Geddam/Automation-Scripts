@@ -95,6 +95,93 @@ sudo systemctl start "$TOMCAT_SERVICE_NAME"
 echo "[✔] Tomcat installed and running!"
 echo "Check: systemctl status tomcat"
 ```
+
+# Tomcat java 21 
+```
+#!/usr/bin/env bash
+set -euo pipefail
+
+### CONFIGURATION ###
+TOMCAT_MAJOR="9"
+TOMCAT_VERSION="9.0.112"
+TOMCAT_USER="tomcat"
+TOMCAT_GROUP="tomcat"
+TOMCAT_INSTALL_DIR="/opt/tomcat"
+TOMCAT_SERVICE_NAME="tomcat"
+
+# 🔒 Explicit Java 21 (no auto-detection)
+JAVA_HOME="/usr/lib/jvm/java-21-openjdk"
+
+### PRE-CHECKS ###
+echo "[*] Verifying Java 21..."
+if [ ! -x "$JAVA_HOME/bin/java" ]; then
+  echo "[ERROR] Java 21 not found at $JAVA_HOME"
+  echo "Install Java 21 before running this script."
+  exit 1
+fi
+
+"$JAVA_HOME/bin/java" -version
+echo "[✔] Java 21 verified"
+
+### USER & GROUP ###
+echo "[*] Creating tomcat group/user if not exists..."
+getent group "$TOMCAT_GROUP" >/dev/null || sudo groupadd "$TOMCAT_GROUP"
+id "$TOMCAT_USER" >/dev/null 2>&1 || sudo useradd -r -g "$TOMCAT_GROUP" \
+  -d "$TOMCAT_INSTALL_DIR" -s /sbin/nologin "$TOMCAT_USER"
+
+### DOWNLOAD TOMCAT ###
+echo "[*] Downloading Tomcat $TOMCAT_VERSION..."
+cd /tmp
+TOMCAT_TAR="apache-tomcat-${TOMCAT_VERSION}.tar.gz"
+TOMCAT_URL="https://dlcdn.apache.org/tomcat/tomcat-${TOMCAT_MAJOR}/v${TOMCAT_VERSION}/bin/${TOMCAT_TAR}"
+
+curl -fSL "$TOMCAT_URL" -o "$TOMCAT_TAR"
+
+### INSTALL ###
+echo "[*] Installing Tomcat..."
+sudo mkdir -p "$TOMCAT_INSTALL_DIR"
+sudo tar -xzf "$TOMCAT_TAR" -C "$TOMCAT_INSTALL_DIR" --strip-components=1
+
+sudo chown -R "$TOMCAT_USER:$TOMCAT_GROUP" "$TOMCAT_INSTALL_DIR"
+sudo chmod -R u+rwX,go-rwx "$TOMCAT_INSTALL_DIR"
+
+### SYSTEMD SERVICE ###
+echo "[*] Creating systemd service..."
+
+sudo tee /etc/systemd/system/${TOMCAT_SERVICE_NAME}.service >/dev/null <<EOF
+[Unit]
+Description=Apache Tomcat ${TOMCAT_MAJOR}
+After=network.target
+
+[Service]
+Type=forking
+User=${TOMCAT_USER}
+Group=${TOMCAT_GROUP}
+
+Environment="JAVA_HOME=${JAVA_HOME}"
+Environment="CATALINA_HOME=${TOMCAT_INSTALL_DIR}"
+Environment="CATALINA_BASE=${TOMCAT_INSTALL_DIR}"
+Environment="CATALINA_PID=${TOMCAT_INSTALL_DIR}/temp/tomcat.pid"
+
+ExecStart=${TOMCAT_INSTALL_DIR}/bin/startup.sh
+ExecStop=${TOMCAT_INSTALL_DIR}/bin/shutdown.sh
+
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+### START TOMCAT ###
+echo "[*] Enabling and starting Tomcat..."
+sudo systemctl daemon-reload
+sudo systemctl enable "$TOMCAT_SERVICE_NAME"
+sudo systemctl restart "$TOMCAT_SERVICE_NAME"
+
+### STATUS ###
+echo "[✔] Tomcat installation completed"
+systemctl status "$TOMCAT_SERVICE_NAME" --no-pager
+```
 📌 Usage Commands
 sudo systemctl start tomcat
 sudo systemctl stop tomcat
